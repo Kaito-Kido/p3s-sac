@@ -26,11 +26,15 @@ def plot_data(data, xaxis='Epoch', value="AverageEpRet", condition="Condition1",
             z = np.ones(len(x))
             smoothed_x = np.convolve(x,y,'same') / np.convolve(z,y,'same')
             datum[value] = smoothed_x
+    
+    
 
     if isinstance(data, list):
         data = pd.concat(data, ignore_index=True)
     sns.set(style="darkgrid", font_scale=1.5)
     sns.tsplot(data=data, time=xaxis, value=value, unit="Unit", condition=condition, ci='sd', **kwargs)
+    # plt.plot(data.Epoch, data.Performance)
+    plt.savefig("myFig")
     """
     If you upgrade to any version of Seaborn greater than 0.8.1, switch from 
     tsplot to lineplot replacing L29 with:
@@ -39,7 +43,7 @@ def plot_data(data, xaxis='Epoch', value="AverageEpRet", condition="Condition1",
 
     Changes the colorscheme and the default legend style, though.
     """
-    plt.legend(loc='best').set_draggable(True)
+    # plt.legend(loc='best').set_draggable(True)
     #plt.legend(loc='upper center', ncol=3, handlelength=1,
     #           borderaxespad=0., prop={'size': 13})
 
@@ -57,6 +61,7 @@ def plot_data(data, xaxis='Epoch', value="AverageEpRet", condition="Condition1",
         plt.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
 
     plt.tight_layout(pad=0.5)
+
 
 def get_datasets(logdir, condition=None):
     """
@@ -97,6 +102,7 @@ def get_datasets(logdir, condition=None):
             exp_data.insert(len(exp_data.columns),'Condition2',condition2)
             exp_data.insert(len(exp_data.columns),'Performance',exp_data[performance])
             datasets.append(exp_data)
+
     return datasets
 
 
@@ -160,7 +166,7 @@ def make_plots(all_logdirs, legend=None, xaxis=None, values=None, count=False,
     for value in values:
         plt.figure()
         plot_data(data, xaxis=xaxis, value=value, condition=condition, smooth=smooth, estimator=estimator)
-    plt.show()
+    plt.show(block=True)
 
 
 def main():
