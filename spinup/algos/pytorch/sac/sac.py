@@ -45,7 +45,7 @@ class ReplayBuffer:
 class Actor(object):
     def __init__(self, actor_num):
         self.actor_num = actor_num
-        self.name = "actor{i}".format(i=self.actor_num)
+        self.name = "Actor{i}".format(i=self.actor_num)
 
 
 
@@ -61,7 +61,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
         polyak=0.995, lr=1e-3, alpha=0.2, batch_size=100, start_steps=10000, 
         update_after=1000, update_every=50, num_test_episodes=10, max_ep_len=1000, 
-        logger_kwargs=dict(), save_freq=1, num_actors=1, best_update_interval=2):
+        logger_kwargs=dict(), save_freq=1, num_actors=4, best_update_interval=2):
     """
     Soft Actor-Critic (SAC)
 
@@ -183,8 +183,10 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     for actor in arr_actor:
         # Create actor-critic module and target networks
         actor.ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
-        # actor.oldpolicy = deepcopy(actor.ac)
+        actor.old_policy = deepcopy(actor.ac)
         actor.ac_targ = deepcopy(actor.ac)
+
+        actor.mean_ret = []
 
         # Freeze target networks with respect to optimizers (only update via polyak averaging)
         for p in actor.ac_targ.parameters():
@@ -203,8 +205,6 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         logger.log('\nActor Num: %d'%actor.actor_num)
         logger.log('\nNumber of parameters: \t pi: %d, \t q1: %d, \t q2: %d\n'%actor.var_counts)
     
-    # best_actor_index = 0
-    # best_actor = deepcopy(arr_actor[best_actor_index].ac)
 
     # Set up function for computing SAC Q-losses
     def compute_loss_q(data, actor):
@@ -230,14 +230,13 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         loss_q = loss_q1 + loss_q2
 
         # Useful info for logging
-        q_info = dict(ActorNum=actor.actor_num,
-                    Q1Vals=q1.detach().numpy(),
+        q_info = dict(Q1Vals=q1.detach().numpy(),
                       Q2Vals=q2.detach().numpy())
 
         return loss_q, q_info
 
     # Set up function for computing SAC pi loss
-    def compute_loss_pi(data,actor):
+    def compute_loss_pi(data,actor, best_actor):
         o = data['obs']
         pi, logp_pi = actor.ac.pi(o)
         q1_pi = actor.ac.q1(o, pi)
@@ -245,17 +244,17 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         q_pi = torch.min(q1_pi, q2_pi)
 
 
-        # distribution = Continuos()
-        # best_action, _ = best_actor.pi(o)
-        # KL = distribution.KL_divergence(best_action.detach(), std, pi.detach(), std)
+        distribution = Continuos()
+        best_action, _ = best_actor.pi(o)
+        KL = distribution.KL_divergence(best_action.detach(), std, pi.detach(), std)
 
         # Entropy-regularized policy loss
-        loss_pi = (alpha * logp_pi - q_pi).mean()
-        # loss_pi = (torch.unsqueeze(alpha * logp_pi - q_pi, 1) + beta * KL).mean()
+        # loss_pi = (alpha * logp_pi - q_pi).mean()
+        loss_pi = (torch.unsqueeze(alpha * logp_pi - q_pi, 1) + beta * KL).mean()
 
 
         # Useful info for logging
-        pi_info = dict(ActorNum=actor.actor_num, LogPi=logp_pi.detach().numpy())
+        pi_info = dict(LogPi=logp_pi.detach().numpy())
 
         return loss_pi, pi_info
 
@@ -269,7 +268,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         logger.setup_pytorch_saver(actor.ac)
         # logger.setup_pytorch_saver(best_actor)
 
-    def update(data,actor):
+    def update(data,actor,best_actor):
         # First run one gradient descent step for Q1 and Q2
         actor.q_optimizer.zero_grad()
         loss_q, q_info = compute_loss_q(data,actor)
@@ -286,7 +285,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
         # Next run one gradient descent step for pi.
         actor.pi_optimizer.zero_grad()
-        loss_pi, pi_info = compute_loss_pi(data, actor)
+        loss_pi, pi_info = compute_loss_pi(data, actor,best_actor)
         loss_pi.backward()
         actor.pi_optimizer.step()
 
@@ -321,20 +320,12 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 o, r, d, _ = actor.test_env.step(get_action(actor, o, True))
                 ep_ret += r
                 ep_len += 1
-            logger.store(ActorNum=actor.actor_num, TestEpRet=ep_ret, TestEpLen=ep_len)
+            logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
     def select_best_actor(arr_actor):
         mean_return = []
         for actor in arr_actor:
-            mean_ep_return = []
-            for j in range(num_test_episodes):
-                o, d, ep_ret, ep_len = actor.test_env.reset(), False, 0, 0
-                while not(d or (ep_len == max_ep_len)):
-                    o, r, d, _ = actor.test_env.step(get_action(actor, o, True))
-                    ep_ret += r
-                    ep_len += 1
-                mean_ep_return.append(ep_ret)
-            mean_return.append(np.mean(mean_ep_return))
+            mean_return.append(np.mean(actor.mean_ret))
         best_actor_index = np.argmax(mean_return)
         return best_actor_index
     
@@ -347,8 +338,17 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     for actor in arr_actor:
         actor.o, actor.ep_ret, actor.ep_len = actor.env.reset(), 0, 0
 
+    best_actor_index = 0
+    best_actor = deepcopy(arr_actor[best_actor_index].ac)
+
     # Main loop: collect experience in env and update/log each epoch
     for t in range(total_steps):
+        if t > update_after and t % int(best_update_interval * steps_per_epoch) == 0:
+            best_actor_index = select_best_actor(arr_actor)
+            best_actor = deepcopy(arr_actor[best_actor_index].ac)
+        
+        if t > update_after and t % steps_per_epoch:
+            actor.old_policy = deepcopy(actor.ac)
         
         for actor in arr_actor:
         # Until start_steps have elapsed, randomly sample actions
@@ -375,55 +375,55 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             # Super critical, easy to overlook step: make sure to update 
             # most recent observation!
             actor.o = o2
-            # print(actor.actor_num, t, actor.ep_ret)
 
             # End of trajectory handling
             if d or (actor.ep_len == max_ep_len):
-                # print(actor.ep_ret)
-                logger.store(EpRet=actor.ep_ret, EpLen=actor.ep_len)
+                actor.mean_ret.append(actor.ep_ret)
+                ret = {}
+                ret[actor.name + 'EpRet'] = actor.ep_ret
+                logger.store(**ret)
                 actor.o, actor.ep_ret, actor.ep_len = actor.env.reset(), 0, 0
 
-                # if actor.actor_num == num_actors-1:
-                #     best_actor_index = select_best_actor(arr_actor)
-                    # logger.store(BestEpRet=arr_actor[best_actor_index].ep_ret)
 
         # Update handling
         if t >= update_after and t % update_every == 0:
             for actor in arr_actor:
-                # actor.oldpolicy = deepcopy(actor.ac)
+                if best_actor_index == actor.actor_num:
+                    continue
                 for j in range(update_every):
                     batch = replay_buffer.sample_batch(batch_size)
-                    update(data=batch,actor=actor)
+                    update(data=batch,actor=actor,best_actor=best_actor)
 
-        # if t >= update_after and t % best_update_interval == 0:
-        #     best_actor_index = select_best_actor(arr_actor)
-        #     best_actor = deepcopy(arr_actor[best_actor_index].ac)
-        #     mean_best = []
-        #     mean_old = []
-        #     batch = replay_buffer.sample_batch(batch_size)
-        #     best_action_mean = get_best_action(best_actor,batch["obs"])
-        #     for actor in arr_actor:
-        #         distribution = Continuos()
-        #         action_mean = get_action(actor, batch["obs"])
-        #         old_action_mean = get_best_action(actor.oldpolicy, batch["obs"])
-        #         bestkl = distribution.KL_divergence(torch.from_numpy(best_action_mean),std, torch.from_numpy(action_mean), std)
-        #         oldkl = distribution.KL_divergence(torch.from_numpy(action_mean), std, torch.from_numpy(old_action_mean), std)
-        #         mean_best.append(bestkl.numpy())
-        #         mean_old.append(oldkl.numpy())
+        if t >= update_after and t % (best_update_interval * steps_per_epoch) == 0:
+            print(t)
+            mean_best = []
+            mean_old = []
+            batch = replay_buffer.sample_batch(batch_size)
+            best_action_mean = get_best_action(best_actor,batch["obs"])
+            for actor in arr_actor:
+                distribution = Continuos()
+                action_mean = get_action(actor, batch["obs"])
+                old_action_mean = get_best_action(actor.old_policy, batch["obs"])
+                bestkl = distribution.KL_divergence(torch.from_numpy(best_action_mean),std, torch.from_numpy(action_mean), std)
+                oldkl = distribution.KL_divergence(torch.from_numpy(action_mean), std, torch.from_numpy(old_action_mean), std)
+                mean_best.append(bestkl.numpy())
+                mean_old.append(oldkl.numpy())
             
-        #     print(t, beta)
-        #     if np.mean(mean_best) > max(target_ratio * np.mean(mean_old), target_range) / 1.5:
-        #         if beta < 1000:
-        #             beta = beta * 2
-        #     if np.mean(mean_best) < max(target_ratio * np.mean(mean_old), target_range) / 1.5:
-        #         if beta > 1/1000:
-        #             beta = beta /2
+            if np.mean(mean_best) > max(target_ratio * np.mean(mean_old), target_range) / 1.5:
+                if beta < 1000:
+                    beta = beta * 2
+            if np.mean(mean_best) < max(target_ratio * np.mean(mean_old), target_range) / 1.5:
+                if beta > 1/1000:
+                    beta = beta /2
 
 
 
         # End of epoch handling
         if (t+1) % steps_per_epoch == 0:
             epoch = (t+1) // steps_per_epoch
+
+            log_best_index = select_best_actor(arr_actor)
+            logger.store(BestEpRet=np.mean(arr_actor[log_best_index].mean_ret))
 
             # Save model
             if (epoch % save_freq == 0) or (epoch == epochs):
@@ -433,11 +433,16 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             for actor in arr_actor:
                 test_agent(actor)
 
+            print('beta: ', beta)
+
             # Log info about epoch
             logger.log_tabular('Epoch', epoch)
-            logger.log_tabular('EpRet', with_min_and_max=True)
+            logger.log_tabular('BestEpRet')
+            for actor in arr_actor:
+                logger.log_tabular(actor.name + 'EpRet')
+            # logger.log_tabular('EpRet', with_min_and_max=True)
+            # logger.log_tabular('EpLen', average_only=True)
             logger.log_tabular('TestEpRet', with_min_and_max=True)
-            logger.log_tabular('EpLen', average_only=True)
             logger.log_tabular('TestEpLen', average_only=True)
             logger.log_tabular('TotalEnvInteracts', t)
             logger.log_tabular('Q1Vals', with_min_and_max=True)
