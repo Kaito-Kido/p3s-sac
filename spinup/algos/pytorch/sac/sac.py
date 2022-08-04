@@ -423,7 +423,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             epoch = (t+1) // steps_per_epoch
 
             log_best_index = select_best_actor(arr_actor)
-            logger.store(BestEpRet=np.mean(arr_actor[log_best_index].mean_ret))
+            logger.store(BestEpRet=arr_actor[log_best_index].mean_ret)
 
             # Save model
             if (epoch % save_freq == 0) or (epoch == epochs):
