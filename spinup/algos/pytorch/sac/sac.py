@@ -430,8 +430,8 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 logger.save_state({'env': env}, None)
 
             # Test the performance of the deterministic version of the agent.
-            for actor in arr_actor:
-                test_agent(actor)
+            
+            test_agent(arr_actor[log_best_index])
 
             print('beta: ', beta)
 
