@@ -343,12 +343,6 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Main loop: collect experience in env and update/log each epoch
     for t in range(total_steps):
-        if t > update_after and t % int(best_update_interval * steps_per_epoch) == 0:
-            best_actor_index = select_best_actor(arr_actor)
-            best_actor = deepcopy(arr_actor[best_actor_index].ac)
-        
-        if t > update_after and t % steps_per_epoch:
-            actor.old_policy = deepcopy(actor.ac)
         
         for actor in arr_actor:
         # Until start_steps have elapsed, randomly sample actions
@@ -394,7 +388,14 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                     batch = replay_buffer.sample_batch(batch_size)
                     update(data=batch,actor=actor,best_actor=best_actor, beta=beta)
 
-        if t >= update_after and t % (best_update_interval * steps_per_epoch) == 0:
+        if t > update_after and (t+1) % int(best_update_interval * steps_per_epoch) == 0:
+            best_actor_index = select_best_actor(arr_actor)
+            best_actor = deepcopy(arr_actor[best_actor_index].ac)
+        
+        if t > update_after and (t+1) % steps_per_epoch:
+            actor.old_policy = deepcopy(actor.ac)
+
+        if t >= update_after and (t+1) % (best_update_interval * steps_per_epoch) == 0:
             mean_best = []
             mean_old = []
             batch = replay_buffer.sample_batch(batch_size)
@@ -449,12 +450,12 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             # logger.log_tabular('EpLen', average_only=True)
             logger.log_tabular('TestEpRet', with_min_and_max=True)
             logger.log_tabular('TestEpLen', average_only=True)
-            logger.log_tabular('TotalEnvInteracts', t)
-            logger.log_tabular('Q1Vals', with_min_and_max=True)
-            logger.log_tabular('Q2Vals', with_min_and_max=True)
-            logger.log_tabular('LogPi', with_min_and_max=True)
-            logger.log_tabular('LossPi', average_only=True)
-            logger.log_tabular('LossQ', average_only=True)
+            logger.log_tabular('TotalEnvInteracts', t * num_actors)
+            # logger.log_tabular('Q1Vals', with_min_and_max=True)
+            # logger.log_tabular('Q2Vals', with_min_and_max=True)
+            # logger.log_tabular('LogPi', with_min_and_max=True)
+            # logger.log_tabular('LossPi', average_only=True)
+            # logger.log_tabular('LossQ', average_only=True)
             logger.log_tabular('Time', time.time()-start_time)
             logger.dump_tabular()
 
