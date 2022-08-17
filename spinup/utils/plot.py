@@ -12,7 +12,7 @@ DIV_LINE_WIDTH = 50
 exp_idx = 0
 units = dict()
 
-def plot_data(data, xaxis='Epoch', value="AverageEpRet", condition="Condition1", smooth=1, **kwargs):
+def plot_data(data, xaxis='Epoch', value="BestEpRet", condition="Condition1", smooth=1, **kwargs):
     if smooth > 1:
         """
         smooth data with moving window average.

@@ -58,7 +58,7 @@ class Continuos():
             return kl_divergence(distribution1, distribution2).float()
 
 def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
-        steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
+        steps_per_epoch=2000, epochs=125, replay_size=int(1e6), gamma=0.99, 
         polyak=0.995, lr=1e-3, alpha=0.2, batch_size=100, start_steps=10000, 
         update_after=1000, update_every=50, num_test_episodes=10, max_ep_len=1000, 
         logger_kwargs=dict(), save_freq=1, num_actors=4, best_update_interval=2):
@@ -170,7 +170,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     std = torch.ones([1, act_dim]).float()
     target_ratio = 2
-    target_range = 0.02
+    target_range = 0.05
 
     # Experience buffer
     replay_buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=replay_size)
@@ -388,14 +388,13 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                     batch = replay_buffer.sample_batch(batch_size)
                     update(data=batch,actor=actor,best_actor=best_actor, beta=beta)
 
-        if t > update_after and (t+1) % int(best_update_interval * steps_per_epoch) == 0:
+        if t > update_after and (t+1) % steps_per_epoch == 0:
             best_actor_index = select_best_actor(arr_actor)
             best_actor = deepcopy(arr_actor[best_actor_index].ac)
         
-        if t > update_after and (t+1) % steps_per_epoch:
-            actor.old_policy = deepcopy(actor.ac)
 
         if t >= update_after and (t+1) % (best_update_interval * steps_per_epoch) == 0:
+            actor.old_policy = deepcopy(actor.ac)
             mean_best = []
             mean_old = []
             batch = replay_buffer.sample_batch(batch_size)
@@ -422,11 +421,11 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         if (t+1) % steps_per_epoch == 0:
             epoch = (t+1) // steps_per_epoch
 
-            log_best_index = select_best_actor(arr_actor)
-            print("best_index", log_best_index)
-            for actor in arr_actor:
-                print(np.mean(actor.mean_ret))
-            BestEpRet=np.mean(arr_actor[log_best_index].mean_ret)
+            # log_best_index = select_best_actor(arr_actor)
+            print("best_index", best_actor_index)
+            # for actor in arr_actor:
+            #     print(np.mean(actor.mean_ret))
+            BestEpRet=np.mean(arr_actor[best_actor_index].mean_ret)
 
             for actor in arr_actor:
                 actor.mean_ret.clear()
@@ -437,7 +436,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
             # Test the performance of the deterministic version of the agent.
             
-            test_agent(arr_actor[log_best_index])
+            test_agent(arr_actor[best_actor_index])
 
             print('beta: ', beta)
 
